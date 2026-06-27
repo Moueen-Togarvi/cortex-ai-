@@ -1,0 +1,61 @@
+# Dependency directories
+node_modules/
+/jspm_packages/
+web_modules/
+
+# Next.js build output
+.next/
+out/
+
+# Production/development logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+bun-debug.log*
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE and editors
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# SQLite databases
+db/*.db
+db/*.db-journal
+db/*.db-shm
+db/*.db-wal
+
+# Local environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env*.local
+
+# Temporary/Agent output files
+tool-results/
+worklog.md
+
+# Download outputs (keep folder & README.md)
+download/*
+!download/README.md
+
+# Screenshots (which were generated in the root directory)
+/screenshot_*.png
+/ss_*.png

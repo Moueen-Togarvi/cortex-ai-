@@ -1,0 +1,418 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Auth & Users ───
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  role      String   @default("user") // admin, user
+  avatar    String?
+  password  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  conversations    Conversation[]
+  agentExecutions  AgentExecution[]
+  documents        Document[]
+  agents           Agent[]
+  workflows        Workflow[]
+  workflowExecs    WorkflowExecution[]
+  knowledgeBases   KnowledgeBase[]
+  apiKeys          ApiKey[]
+  auditLogs        AuditLog[]
+  sessions         Session[]
+  invitationsSent  TeamInvitation[]   @relation("Invitations")
+  webhooks         Webhook[]
+  notifications    Notification[]     @relation("Notifications")
+  traces           Trace[]            @relation("Traces")
+}
+
+// ─── Agents ───
+
+model Agent {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  model       String   @default("gpt-4o")
+  systemPrompt String  @default("")
+  tools       String   @default("[]") // JSON array of tool IDs
+  temperature Float    @default(0.7)
+  maxTokens   Int      @default(4096)
+  status      String   @default("draft") // active, draft, archived
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user       User             @relation(fields: [userId], references: [id])
+  executions AgentExecution[]
+}
+
+// ─── Agent Executions ───
+
+model AgentExecution {
+  id          String   @id @default(cuid())
+  agentId     String
+  userId      String
+  input       String   // user message
+  output      String?  // agent response
+  toolsUsed   String   @default("[]") // JSON array of tool IDs used
+  steps       String   @default("[]") // JSON array of reasoning steps (ReAct loop)
+  tokens      Int      @default(0)
+  latencyMs   Int      @default(0)
+  status      String   @default("success") // success, error, timeout
+  createdAt   DateTime @default(now())
+
+  agent     Agent     @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id])
+  toolCalls ToolCall[]
+}
+
+// ─── Workflows ───
+
+model Workflow {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  status      String   @default("draft") // active, draft, paused
+  nodes       String   // JSON array of workflow nodes
+  edges       String   // JSON array of workflow edges
+  userId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user        User                @relation(fields: [userId], references: [id])
+  executions  WorkflowExecution[]
+}
+
+// ─── Agent Tool Calls ───
+
+model ToolCall {
+  id               String   @id @default(cuid())
+  agentExecutionId String
+  toolId           String   // which tool was called
+  toolName         String   // human-readable name
+  input            String   // JSON input parameters
+  output           String?  // tool output result
+  status           String   @default("success") // success, error, skipped
+  latencyMs        Int      @default(0)
+  stepIndex        Int      @default(0) // which reasoning step this belongs to
+  createdAt        DateTime @default(now())
+
+  agentExecution AgentExecution @relation(fields: [agentExecutionId], references: [id], onDelete: Cascade)
+}
+
+// ─── Workflow Executions ───
+
+model WorkflowExecution {
+  id          String   @id @default(cuid())
+  workflowId  String
+  userId      String
+  status      String   @default("running") // running, success, failed, cancelled
+  durationMs  Int      @default(0)
+  triggeredBy String   @default("manual")
+  result      String?  // JSON result
+  error       String?
+  createdAt   DateTime @default(now())
+
+  workflow    Workflow               @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  user        User                   @relation(fields: [userId], references: [id])
+  nodeExecs   WorkflowNodeExecution[]
+}
+
+// ─── Workflow Node Executions ───
+
+model WorkflowNodeExecution {
+  id               String   @id @default(cuid())
+  workflowExecId   String
+  nodeId           String   // the node ID from the workflow definition
+  nodeType         String   // llm, tool, condition, http, code, input, output
+  nodeLabel        String?  // human-readable label
+  status           String   @default("pending") // pending, running, success, failed, skipped
+  input            String?  // JSON input to the node
+  output           String?  // JSON output from the node
+  error            String?
+  durationMs       Int      @default(0)
+  executionOrder   Int      @default(0) // order of execution
+  createdAt        DateTime @default(now())
+
+  workflowExec WorkflowExecution @relation(fields: [workflowExecId], references: [id], onDelete: Cascade)
+}
+
+// ─── Conversations ───
+
+model Conversation {
+  id              String    @id @default(cuid())
+  title           String    @default("New Chat")
+  model           String    @default("gpt-4o")
+  knowledgeBaseId String?
+  temperature     Float     @default(0.7)
+  userId          String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id])
+  messages Message[]
+
+  knowledgeBase KnowledgeBase? @relation(fields: [knowledgeBaseId], references: [id])
+}
+
+// ─── Messages ───
+
+model Message {
+  id             String      @id @default(cuid())
+  conversationId String
+  role           String      // user, assistant, system
+  content        String
+  model          String?
+  tokens         Int         @default(0)
+  createdAt      DateTime    @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+// ─── Knowledge Bases ───
+
+model KnowledgeBase {
+  id             String      @id @default(cuid())
+  name           String
+  description    String?
+  status         String      @default("active") // active, building, error
+  embeddingModel String      @default("text-embedding-3-small")
+  documentCount  Int         @default(0)
+  totalChunks    Int         @default(0)
+  userId         String
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id])
+  documents     Document[]
+  chunks       DocumentChunk[]
+  conversations Conversation[]
+}
+
+// ─── Documents ───
+
+model Document {
+  id             String        @id @default(cuid())
+  name           String
+  type           String        // pdf, docx, txt, md
+  size           Int           @default(0)
+  status         String        @default("queued") // queued, processing, ready, error
+  chunks         Int           @default(0)
+  filePath       String?
+  knowledgeBaseId String
+  userId         String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id])
+  knowledgeBase KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id])
+}
+
+// ─── LLM Usage Tracking ───
+
+model LLMUsage {
+  id        String   @id @default(cuid())
+  date      String   // YYYY-MM-DD
+  tokens    Int      @default(0)
+  cost      Float    @default(0)
+  requests  Int      @default(0)
+  model     String?
+  createdAt DateTime @default(now())
+}
+
+// ─── API Keys ───
+
+model ApiKey {
+  id          String   @id @default(cuid())
+  name        String
+  keyHash     String   @unique
+  keyPrefix   String
+  permissions String   @default("[]") // JSON array
+  userId      String
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  status      String   @default("active") // active, revoked
+  requestCount Int     @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id])
+}
+
+// ─── Sessions ───
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── Audit Logs ───
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String   // login, logout, create_agent, run_workflow, etc.
+  resource  String?  // agents, workflows, conversations, etc.
+  resourceId String?  // ID of the affected resource
+  details   String?  // JSON metadata
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+}
+
+// ─── Document Chunks (for RAG) ───
+
+model DocumentChunk {
+  id             String   @id @default(cuid())
+  documentId     String
+  knowledgeBaseId String
+  knowledgeBase  KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  content         String
+  chunkIndex     Int
+  embedding       String   // JSON array of floats (vector)
+  metadata        String   @default("{}") // JSON metadata (page, section, etc.)
+  createdAt       DateTime @default(now())
+}
+// ─── Team Invitations ───
+
+model TeamInvitation {
+  id         String   @id @default(cuid())
+  email      String
+  role       String   @default("viewer") // admin, editor, viewer
+  invitedBy  String
+  token      String   @unique
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  inviter User @relation("Invitations", fields: [invitedBy], references: [id])
+}
+
+// ─── Webhooks ───
+
+model Webhook {
+  id             String   @id @default(cuid())
+  name           String
+  url            String
+  events         String   @default("[]") // JSON array of event types
+  secret         String   @default("")
+  enabled        Boolean  @default(true)
+  userId         String
+  lastDeliveryAt DateTime?
+  successRate    Float    @default(0)
+  deliveryCount  Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user       User             @relation(fields: [userId], references: [id])
+  deliveries WebhookDelivery[]
+}
+
+// ─── Webhook Deliveries ───
+
+model WebhookDelivery {
+  id          String   @id @default(cuid())
+  webhookId   String
+  eventId     String   // e.g., "agent.complete"
+  payload     String   // JSON payload
+  statusCode  Int      @default(0)
+  durationMs  Int      @default(0)
+  success     Boolean  @default(false)
+  response    String?
+  createdAt   DateTime @default(now())
+
+  webhook Webhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+}
+
+// ─── Notifications ───
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String?
+  type      String   // info, success, warning, error
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  link      String?  // optional deep link
+  createdAt DateTime @default(now())
+
+  user User? @relation("Notifications", fields: [userId], references: [id])
+}
+
+// ─── LLM Call Traces (Observability) ───
+
+model Trace {
+  id          String   @id @default(cuid())
+  traceId     String   @unique  // OpenTelemetry-style trace ID
+  spanId      String   // span within trace
+  parentId    String?  // parent span for nested calls (agent → tool → LLM)
+  source      String   // chat, agent, workflow, rag
+  sourceId    String?  // conversationId, agentId, workflowId, etc.
+  model       String   // e.g. gpt-4o
+  input       String   // user/system message input
+  output      String?  // LLM response output
+  inputTokens Int      @default(0)
+  outputTokens Int     @default(0)
+  totalTokens Int      @default(0)
+  latencyMs   Int      @default(0)
+  cost        Float    @default(0)
+  status      String   @default("success") // success, error, timeout, filtered
+  errorMessage String?
+  metadata    String   @default("{}") // JSON: rag context, tool calls, guardrails, etc.
+  userId      String?
+  createdAt   DateTime @default(now())
+
+  user User? @relation("Traces", fields: [userId], references: [id])
+  guardrailEvals GuardrailEval[]
+}
+
+// ─── Guardrail Policies ───
+
+model GuardrailPolicy {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  type        String   // pii_detection, content_filter, output_validation, custom
+  enabled     Boolean  @default(true)
+  scope       String   @default("all") // all, chat, agent, workflow
+  config      String   @default("{}") // JSON config for the policy
+  severity    String   @default("medium") // low, medium, high, critical
+  action      String   @default("flag") // flag, block, mask, log
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  evals GuardrailEval[]
+}
+
+// ─── Guardrail Evaluations ───
+
+model GuardrailEval {
+  id           String   @id @default(cuid())
+  policyId     String
+  traceId      String?
+  input        String?  // text that was evaluated
+  output       String?  // evaluation result
+  passed       Boolean
+  violations   String   @default("[]") // JSON array of violation details
+  maskedOutput String?  // if action=mask, the masked version
+  latencyMs    Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  policy  GuardrailPolicy @relation(fields: [policyId], references: [id])
+  trace   Trace?          @relation(fields: [traceId], references: [id])
+}
